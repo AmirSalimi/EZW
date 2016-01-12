@@ -1,0 +1,287 @@
+%EWZ project 2 (simple) modified to find approximate rate
+% use this to see what reconstrution will look like
+
+clear all
+close all
+
+load barb_1
+%load eltorro
+%load mandrill
+%load lena_512x512
+
+cycle = 15;
+
+mse = zeros(1,cycle);
+psnr_db = mse;
+bits_used = mse;
+
+for ww = 1:cycle
+
+    %choose number of iterations
+    iterations = ww;
+    % total_levels = 9;
+    num_decomp_levels = 9;
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% num_decomp_levels = 3;
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    image_1 = double(barb_1(:,:,1));
+%   image_1 = double(barb_1(:,:,1));
+
+    %for now, just use 64x64 block first 
+
+    %img_blk = barb_1(1:8,1:8);
+    img_blk = image_1;
+
+    %perform wavelet decomposition:
+    %Haar wavelet coefficients
+    h0 = sqrt(2).*[1 1];
+    h1 = sqrt(2).*[1 1];
+    g0 = sqrt(2).*[1 -1];
+    g1 = sqrt(2).*[-1 1];
+
+    % [ll1 lu1 ul1 uu1] = dwt2(img_blk, 'haar');
+    % [ll2 lu2 ul2 uu2] = dwt2(ll1, 'haar');
+    % [ll3 lu3 ul3 uu3] = dwt2(ll2, 'haar');
+
+    [ll1 lu1 ul1 uu1] = dwt2(img_blk, 'db1');
+    [ll2 lu2 ul2 uu2] = dwt2(ll1, 'db1');
+    [ll3 lu3 ul3 uu3] = dwt2(ll2, 'db1');
+    [ll4 lu4 ul4 uu4] = dwt2(ll3, 'db1');
+    [ll5 lu5 ul5 uu5] = dwt2(ll4, 'db1');
+    [ll6 lu6 ul6 uu6] = dwt2(ll5, 'db1');
+    [ll7 lu7 ul7 uu7] = dwt2(ll6, 'db1');
+    [ll8 lu8 ul8 uu8] = dwt2(ll7, 'db1');
+    [ll9 lu9 ul9 uu9] = dwt2(ll8, 'db1');
+
+    %'put together' matrix
+
+    full_mat = [[[[[[[[[ll9 lu9; ul9 uu9] lu8; ul8 uu8] lu7; ul7 uu7] lu6;...
+        ul6 uu6] lu5; ul5 uu5] lu4; ul4 uu4] lu3; ul3 uu3] lu2; ul2 uu2] ...
+        lu1; ul1 uu1];
+
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%     full_mat = [63 -34 49 10 7 13 -12 7;-31 23 14 -13 3 4 6 -1;15 14 3 -12 5 ...
+%         -7 3 9; -9 -7 -14 8 4 -2 3 2; -5 9 -1 47 4 6 -2 2; 3 0 -3 2 3 -2 0 ...
+%         4; 2 -3 6 -4 3 6 3 6; 5 11 5 6 0 3 -4 4];
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    % full_mat = [[[ll3 lu3; ul3 uu3] lu2; ul2 uu2] lu1; ul1 uu1];
+
+    full_mat_orig = full_mat;
+
+    % %find initial threshold t0:
+    t0 = 2^(floor(log2(max(max(abs(full_mat))))));
+
+    final_reconstruction = zeros(size(full_mat));
+
+    m{1} = [lu1; ul1; uu1];
+    m{2} = [lu2; ul2; uu2];
+    m{3} = [lu3; ul3; uu3];
+    m{4} = [lu4; ul4; uu4];
+    m{5} = [lu5; ul5; uu5];
+    m{6} = [lu6; ul6; uu6];
+    m{7} = [lu7; ul7; uu7];
+    m{8} = [lu8; ul8; uu8];
+    m{9} = [lu9; ul9; uu9];
+
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%     m{1} = [full_mat(1:4, 5:8); full_mat(5:8, 1:4); full_mat(5:8, 5:8)];
+%     m{2} = [full_mat(1:2, 3:4); full_mat(3:4, 1:2); full_mat(3:4, 3:4)];
+%     m{3} = [-34; -31; 23];
+%     ll3 = 63;
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    %initialize refinement bits, total bits and groups of four
+    refinement_bits = 1;    %account for top-left value
+    %four_blk_ttl = 0;
+    total_bits = zeros(1,iterations);
+    old_compare_mat = zeros(size(full_mat));
+
+    refinement_bits_prev = 0;
+
+    for i = 1:iterations
+        %compare coefficients to threshold
+        compare_mat1 = full_mat >= t0;
+        compare_mat2 = full_mat <= -t0;
+
+        %initialize compare matrix
+        mcb_prev = zeros(size(m{1}));
+
+        %start form outer most ring and go in
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        for j = 1:num_decomp_levels - 1
+            %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+            %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+            %compare concatinated matricies to threshod
+            mc = abs(m{j}) >= abs(t0);
+    %         mc{2} = abs(m{2}) >= abs(t0);
+    %         mc{3} = abs(m{3}) >= abs(t0);
+    %         mc{4} = abs(m{4}) >= abs(t0);
+    %         mc{5} = abs(m{5}) >= abs(t0);
+    %         mc{6} = abs(m{6}) >= abs(t0);
+    %         mc{7} = abs(m{7}) >= abs(t0);
+    %         mc{8} = abs(m{8}) >= abs(t0);
+    %         mc{9} = abs(m{9}) >= abs(t0);
+    
+            first_loop_correction = sum(sum(mc));
+
+            %partition compare matricies into 4x4 blocks
+            [row col] = size(mc);
+            mcb = mat2cell(mc, 2.*ones(1,row/2), 2.*ones(1,col/2));
+
+            %sum compare/cell/matricies
+            sum_mat = zeros(row/2, col/2);
+            for ii = 1:row/2
+                for jj = 1:col/2
+                    %create a 'sum' matrix
+                    sum_mat(ii,jj) = sum(sum(mcb{ii,jj}));         
+                end
+            end
+
+            sum_mat_compare = sum_mat > 0;
+
+            %check for new significant occurances
+            check_new_sig = mc - mcb_prev;
+            check_new_sig_comp = check_new_sig > 0;
+            new_sig_total = sum(sum(check_new_sig_comp));
+
+            if j == 1
+                new_sig_correction = 0;
+                four_blk = sum(sum(sum_mat_compare))*4 + first_loop_correction;
+            elseif j == 2
+                new_sig_correction = new_sig_total*4;
+                four_blk = sum(sum(sum_mat_compare))*8;
+            else
+                new_sig_correction = new_sig_total*8;
+                %number of bits to transmit(x8)
+                four_blk = sum(sum(sum_mat_compare))*8;
+        %        four_blk_ttl = four_blk + four_blk_ttl;
+            end
+
+            %number of significant bits
+            significant_list = sum(sum(sum_mat));
+
+            %number of refinement bits
+            refinement_bits = significant_list + refinement_bits;
+
+            %find number of bits resulting from traceback (IZ case)
+            trace_back = find_traceback_bits(j, num_decomp_levels, sum_mat); 
+
+            total_bits(i) = total_bits(i) + four_blk + new_sig_correction + ...
+                trace_back;
+
+            mcb_prev = sum_mat_compare;
+        end
+
+        %account for top-left four values AND new occurences!!!
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%         mc_base = abs(m{3}) >= abs(t0);
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        mc_base = abs(m{9}) >= abs(t0);
+        sig_values_topleft = sum(mc_base);
+
+        %check for new significant occurances
+        check_new_sig_top = mc_base - mcb_prev;
+        check_new_sig_comp_top = check_new_sig_top > 0;
+        new_sig_total_top = sum(sum(check_new_sig_comp_top));
+
+        total_bits(i) = total_bits(i) + 8*new_sig_total_top + 8;
+        refinement_bits = refinement_bits + sig_values_topleft;
+
+
+        %reconstruct:
+        re_matrix1 = compare_mat1 .* 1.5*t0;
+        re_matrix2 = compare_mat2 .* -1.5*t0;
+        re_matrix  = re_matrix1 + re_matrix2 + final_reconstruction;
+
+        %refine
+        correction_value = t0/4;
+        diff_mat = ((compare_mat1 + compare_mat2).*full_mat + ...
+            old_compare_mat.*full_mat_orig) - re_matrix;
+        old_compare_mat = compare_mat1 + compare_mat2 + old_compare_mat;
+        old_compare_mat = old_compare_mat > 0;
+        plus_mat = diff_mat > 0;
+        minus_mat = diff_mat < 0;
+
+        final_reconstruction = (plus_mat + -1.*minus_mat).*correction_value +...
+            re_matrix;
+
+        full_mat = full_mat .* (ones(size(compare_mat1)) - (compare_mat1+compare_mat2));
+
+        %retreive 'll', 'lu', 'ul', 'uu' terms from full_mat
+        m{9} = [full_mat(1,2); full_mat(2,1); full_mat(2,2)];
+        m{8} = [full_mat(1:2,3:4); full_mat(3:4,1:2); full_mat(3:4,3:4)];
+        m{7} = [full_mat(1:4,5:8); full_mat(5:8,1:4); full_mat(5:8,5:8)];
+        m{6} = [full_mat(1:8,9:16); full_mat(9:16,1:8); full_mat(9:16,9:16)];
+        m{5} = [full_mat(1:16,17:32); full_mat(17:32,1:16); full_mat(17:32,17:32)];
+        m{4} = [full_mat(1:32,33:64); full_mat(33:64,1:32); full_mat(33:64,33:64)];
+        m{3} = [full_mat(1:64,65:128); full_mat(65:128,1:64); full_mat(65:128,65:128)];
+        m{2} = [full_mat(1:128,129:256); full_mat(129:256,1:128); full_mat(129:256,129:256)];
+        m{1} = [full_mat(1:256,257:512); full_mat(257:512,1:256); full_mat(257:512,257:512)];
+
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%     m{1} = [full_mat(1:4, 5:8); full_mat(5:8, 1:4); full_mat(5:8, 5:8)];
+%     m{2} = [full_mat(1:2, 3:4); full_mat(3:4, 1:2); full_mat(3:4, 3:4)];
+%     m{3} = [full_mat(1,2); full_mat(2,1); full_mat(2,2)];
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+        %find iteration total of bits
+        total_bits(i) = total_bits(i) + refinement_bits;
+
+        refinement_bits_prev = refinement_bits;
+
+        %find new threshold
+        t0 = t0/2;
+    end
+
+    %final total number of bits used:
+    final_total = sum(total_bits) + 2;
+
+    %reconstruct:
+    [origImage] = idwt2(final_reconstruction(1,1), final_reconstruction(1,2),...
+        final_reconstruction(2,1), final_reconstruction(2,2), 'db1');
+
+    [origImage2] = idwt2(origImage, final_reconstruction(1:2,3:4),...
+        final_reconstruction(3:4,1:2), final_reconstruction(3:4,3:4), 'db1');
+
+    [origImage3] = idwt2(origImage2, final_reconstruction(1:4,5:8),...
+        final_reconstruction(5:8,1:4), final_reconstruction(5:8,5:8), 'db1');
+
+    %%%
+
+    [origImage4] = idwt2(origImage3, final_reconstruction(1:8,9:16),...
+        final_reconstruction(9:16,1:8), final_reconstruction(9:16,9:16), 'db1');
+
+    [origImage5] = idwt2(origImage4, final_reconstruction(1:16,17:32),...
+        final_reconstruction(17:32,1:16), final_reconstruction(17:32,17:32), 'db1');
+
+    [origImage6] = idwt2(origImage5, final_reconstruction(1:32,33:64),...
+        final_reconstruction(33:64,1:32), final_reconstruction(33:64,33:64), 'db1');
+
+    [origImage7] = idwt2(origImage6, final_reconstruction(1:64,65:128),...
+        final_reconstruction(65:128,1:64), final_reconstruction(65:128,65:128), 'db1');
+
+    [origImage8] = idwt2(origImage7, final_reconstruction(1:128,129:256),...
+        final_reconstruction(129:256,1:128), final_reconstruction(129:256,129:256), 'db1');
+
+    [origImage9] = idwt2(origImage8, final_reconstruction(1:256,257:512),...
+        final_reconstruction(257:512,1:256), final_reconstruction(257:512,257:512), 'db1');
+
+
+    %calculate mse
+    mse(ww) = sum(sum((image_1 - origImage9).^2))/(512*512);
+
+    %calculate psnr(dB)
+    psnr_db(ww) = 10*log10(255^2/mse(ww));
+
+    %est bits used
+    bits_used(ww)  = final_total;
+    
+    figure
+    imshow(origImage9, [0 255]);
+    title(['Barb at ' , num2str(ww), ' iterations.  MSE:',num2str(mse(ww)), ...
+        '  PSNR dB:' ,num2str(psnr_db(ww)), '  bits used:',num2str(bits_used(ww))]);
+end
